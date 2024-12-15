@@ -109,6 +109,20 @@ func TestConfig_URI(t *testing.T) {
 	is.Equal(d.URI().String(), "mysql://testuser:password1@localhost:3306/db?connect-timeout=3&ssl-ca=ca.crt&ssl-cert=ssl.crt&ssl-key=ssl.key&ssl-mode=disable")
 }
 
+func TestConfig_EnvOverride(t *testing.T) {
+	var c Config
+	clearEnv()
+	is := is.New(t)
+	c.Type = PostgresDBType
+	c.EnvOverride()
+	is.Equal(c.URI().String(), "postgres://localhost:5432/")
+
+	c.Port = ""
+	c.Type = MySQLDBType
+	c.EnvOverride()
+	is.Equal(c.URI().String(), "mysql://localhost:3306/")
+}
+
 func TestUtils(t *testing.T) {
 	is := is.New(t)
 	v, err := getEnvUint("__NOT_HERE__", 25)

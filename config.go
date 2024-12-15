@@ -70,6 +70,28 @@ func (db *Config) Init() {
 	}
 }
 
+func (db *Config) EnvOverride() {
+	keyPre := strings.ToUpper(string(db.Type)) + "_"
+	var defPort string
+	switch db.Type {
+	case PostgresDBType:
+		defPort = "5432"
+	case MySQLDBType:
+		defPort = "3306"
+	}
+	db.Host = getEnv(keyPre+"HOST", db.Host, "localhost")
+	db.Port = getEnv(keyPre+"PORT", db.Port, defPort)
+	db.User = getEnv(keyPre+"USER", db.User)
+	db.Password = getEnv(keyPre+"PASSWORD", db.Password)
+	db.DBName = getEnv(keyPre+"DB", db.DBName)
+	db.SSLMode = getEnv(keyPre+"SSLMODE", db.SSLMode)
+	db.ConnectTimeout, _ = getEnvUint(keyPre+"CONNECT_TIMEOUT", db.ConnectTimeout)
+	db.SSLCA = getEnv(keyPre+"SSLCA", db.SSLCA)
+	db.SSLKey = getEnv(keyPre+"SSL_KEY", db.SSLKey)
+	db.SSLCert = getEnv(keyPre+"SSL_CERT", db.SSLCert)
+	db.SSLSNI = getEnv(keyPre+"SSL_SNI", db.SSLSNI)
+}
+
 func (db *Config) URI() *url.URL {
 	u := url.URL{
 		Scheme: string(db.Type),
@@ -141,8 +163,10 @@ func getEnv(key string, defaults ...string) string {
 func getEnvUint(key string, defaults ...uint64) (uint64, error) {
 	v, ok := os.LookupEnv(key)
 	if !ok {
-		if len(defaults) > 0 {
-			return defaults[0], nil
+		for _, val := range defaults {
+			if val > 0 {
+				return val, nil
+			}
 		}
 		return 0, errEnvNotFound
 	}

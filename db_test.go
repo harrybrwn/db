@@ -1,16 +1,21 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"io"
 	"log/slog"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/matryer/is"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"go.uber.org/mock/gomock"
 
 	"github.com/harrybrwn/db/mockrows"
+	"github.com/harrybrwn/db/mocktx"
 )
 
 func TestScanOne(t *testing.T) {
@@ -88,6 +93,72 @@ func TestScanOne(t *testing.T) {
 	})
 }
 
+func TestWithStmt(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	db := mocktx.NewMockStmtPreparor(ctrl)
+
+	db.EXPECT().PrepareContext(ctx, "select * from table where id = $1").Return(nil, ErrDBTimeout)
+	err := WithStmt(ctx, db, "select * from table where id = $1", func(stmt *sql.Stmt) error {
+		t.Error("this should not be called")
+		return nil
+	})
+	if !errors.Is(err, ErrDBTimeout) {
+		t.Fatal("expected to get the db timeout error")
+	}
+}
+
+func TestWithTx(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	db := mocktx.NewMockTxBeginor(ctrl)
+
+	db.EXPECT().BeginTx(ctx, gomock.AnyOf(&sql.TxOptions{})).Return(nil, ErrDBTimeout)
+	err := WithTx(ctx, db, nil, func(tx *sql.Tx) error {
+		t.Error("should not have called the callback")
+		return nil
+	})
+	if !errors.Is(err, ErrDBTimeout) {
+		t.Fatal("expected to get the db timeout error")
+	}
+	db.EXPECT().BeginTx(ctx, gomock.AnyOf(&sql.TxOptions{})).Return(nil, ErrDBTimeout)
+	err = WithTxStmt(ctx, db, nil, "", func(stmt *sql.Stmt) error {
+		t.Error("should not have called the callback")
+		return nil
+	})
+	if !errors.Is(err, ErrDBTimeout) {
+		t.Fatal("expected to get the db timeout error")
+	}
+	d, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	_, err = d.Exec("create table t (a int);")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = WithTxStmt(ctx, d, nil, "select * from t", func(stmt *sql.Stmt) error {
+		res, err := stmt.Exec()
+		if err != nil && errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 0 {
+			t.Error("expected no rows effected")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNew(t *testing.T) {
 	is := is.New(t)
 	l := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -96,9 +167,6 @@ func TestNew(t *testing.T) {
 	is.Equal(db.logger, l)
 }
 
-// TODO Uncomment when WaitFor is added.
-
-/*
 // swap out the function that gets the current time
 func withNow(tm time.Time) func() {
 	now = func() time.Time {
@@ -160,7 +228,8 @@ func TestWaitFor(t *testing.T) {
 		ping.EXPECT().Ping().Return(nil)
 		inter := time.Millisecond * 10
 		start := time.Now()
-		err := WaitFor(ctx, ping, WithInterval(inter), WithWaitLogger(log.SilentLogger()))
+		l := slog.New(&noopLogHandler{})
+		err := WaitFor(ctx, ping, WithInterval(inter), WithWaitLogger(l))
 		is.NoErr(err)
 		isWithinMargin(t, time.Since(start), inter*3, time.Millisecond*2)
 	})
@@ -185,7 +254,7 @@ func TestWaitFor_Functional(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	ctx = log.StashInContext(ctx, log.GetLogger())
+	// ctx = log.StashInContext(ctx, log.GetLogger())
 	err = WaitFor(
 		ctx,
 		db,
@@ -196,4 +265,3 @@ func TestWaitFor_Functional(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-*/

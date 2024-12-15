@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/pkg/errors"
@@ -21,17 +22,21 @@ var (
 	ErrDBTimeout = errors.New("database ping timeout")
 )
 
+// DB is an abstract sql database type.
 type DB interface {
 	io.Closer
 	QueryContext(context.Context, string, ...any) (Rows, error)
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+// Pingable is an abstract type that has Ping methods.
 type Pingable interface {
 	Ping() error
 	PingContext(context.Context) error
 }
 
+// Scanner is an object that can be scanned such that the pointers passed will
+// be populated with the correspoding row value of a database query.
 type Scanner interface {
 	Scan(...any) error
 }
@@ -48,6 +53,7 @@ type StmtPreparor interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 }
 
+// Rows is an abstract iterator type that is returned by database queries.
 type Rows interface {
 	Scanner
 	io.Closer
@@ -55,6 +61,7 @@ type Rows interface {
 	Err() error
 }
 
+// ScanOne will scan one row from a query and then close the Rows object.
 func ScanOne(r Rows, dest ...any) (err error) {
 	if !r.Next() {
 		if err = r.Err(); err != nil {
@@ -108,14 +115,10 @@ func (db *database) QueryContext(ctx context.Context, query string, v ...any) (R
 	return rows, err
 }
 
-// TODO Add standard logging that will be compatible with either slog or logrus
-//      before adding WaitFor.
-
-/*
 type waitOpts struct {
 	interval time.Duration
 	timeout  time.Duration
-	logger   log.FieldLogger
+	logger   *slog.Logger
 }
 
 type WaitOpt func(*waitOpts)
@@ -128,7 +131,7 @@ func WithTimeout(d time.Duration) WaitOpt {
 	return func(wo *waitOpts) { wo.timeout = d }
 }
 
-func WithWaitLogger(l log.FieldLogger) WaitOpt { return func(wo *waitOpts) { wo.logger = l } }
+func WithWaitLogger(l *slog.Logger) WaitOpt { return func(wo *waitOpts) { wo.logger = l } }
 
 var now = time.Now
 
@@ -136,13 +139,10 @@ var now = time.Now
 func WaitFor(ctx context.Context, database Pingable, opts ...WaitOpt) (err error) {
 	wo := waitOpts{
 		interval: time.Second * 2,
-		logger:   log.FromContext(ctx),
+		logger:   slog.Default(),
 	}
 	for _, o := range opts {
 		o(&wo)
-	}
-	if wo.logger == nil {
-		wo.logger = log.SilentLogger()
 	}
 
 	var cancel context.CancelFunc = func() {}
@@ -166,10 +166,16 @@ func WaitFor(ctx context.Context, database Pingable, opts ...WaitOpt) (err error
 				wo.logger.Info("database connected")
 				return nil
 			}
-			wo.logger.WithError(err).Warn("failed to ping database, retrying...")
+			wo.logger.Warn("failed to ping database, retrying...", slog.Any("error", err))
 		case <-ctx.Done():
 			return errors.Wrap(ErrDBTimeout, "could not reach database")
 		}
 	}
 }
-*/
+
+type noopLogHandler struct{}
+
+func (nh *noopLogHandler) Enabled(context.Context, slog.Level) bool  { return false }
+func (nh *noopLogHandler) Handle(context.Context, slog.Record) error { return nil }
+func (nh *noopLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler  { return nh }
+func (nh *noopLogHandler) WithGroup(name string) slog.Handler        { return nh }
