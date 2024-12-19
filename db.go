@@ -115,6 +115,16 @@ func (db *database) QueryContext(ctx context.Context, query string, v ...any) (R
 	return rows, err
 }
 
+type Tx struct {
+	*sql.Tx
+}
+
+func (tx *Tx) QueryContext(ctx context.Context, query string, v ...any) (Rows, error) {
+	return tx.Tx.QueryContext(ctx, query, v...)
+}
+
+func (tx *Tx) Close() error { return nil }
+
 type waitOpts struct {
 	interval time.Duration
 	timeout  time.Duration
