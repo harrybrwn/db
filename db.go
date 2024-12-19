@@ -24,7 +24,7 @@ var (
 
 // DB is an abstract sql database type.
 type DB interface {
-	io.Closer
+	// io.Closer
 	QueryContext(context.Context, string, ...any) (Rows, error)
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
@@ -84,8 +84,10 @@ type dbOptions struct {
 
 type Option func(*dbOptions)
 
+// WithLogger sets the logger to use with an resource that takes an [Option].
 func WithLogger(l *slog.Logger) Option { return func(d *dbOptions) { d.logger = l } }
 
+// New will wrap an [sql.DB] and return a type that implements [DB].
 func New(pool *sql.DB, opts ...Option) *database {
 	options := dbOptions{}
 	for _, o := range opts {
@@ -115,6 +117,22 @@ func (db *database) QueryContext(ctx context.Context, query string, v ...any) (R
 	return rows, err
 }
 
+// Simple creates a bare bones simple wrapper around a [sql.DB] that implements
+// [DB].
+func Simple(db *sql.DB) *simple { return &simple{db} }
+
+type simple struct {
+	*sql.DB
+}
+
+func (db *simple) QueryContext(ctx context.Context, query string, v ...any) (Rows, error) {
+	return db.DB.QueryContext(ctx, query, v...)
+}
+
+// NewTx creates a wrapper around the standard library [sql.Tx] and returns a
+// wrapper type that implements [DB].
+func NewTx(tx *sql.Tx) *Tx { return &Tx{Tx: tx} }
+
 type Tx struct {
 	*sql.Tx
 }
@@ -123,24 +141,26 @@ func (tx *Tx) QueryContext(ctx context.Context, query string, v ...any) (Rows, e
 	return tx.Tx.QueryContext(ctx, query, v...)
 }
 
-func (tx *Tx) Close() error { return nil }
-
 type waitOpts struct {
 	interval time.Duration
 	timeout  time.Duration
 	logger   *slog.Logger
 }
 
+// WaitOpt respresents an option type for the [WaitFor] function.
 type WaitOpt func(*waitOpts)
 
+// WithInterval sets the interval to wait after each time [db.Ping] is called when using [WaitFor].
 func WithInterval(d time.Duration) WaitOpt {
 	return func(wo *waitOpts) { wo.interval = d }
 }
 
+// WithTimeout sets the timeout to use when calling [WaitFor].
 func WithTimeout(d time.Duration) WaitOpt {
 	return func(wo *waitOpts) { wo.timeout = d }
 }
 
+// WithWaitLogger sets the logger to use when calling [WaitFor].
 func WithWaitLogger(l *slog.Logger) WaitOpt { return func(wo *waitOpts) { wo.logger = l } }
 
 var now = time.Now
