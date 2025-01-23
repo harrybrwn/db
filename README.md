@@ -5,7 +5,7 @@ and testing.
 
 ```go
 import (
-	"database/sql"
+    "database/sql"
 
     "github.com/harrybrwn/db"
 )

@@ -24,9 +24,10 @@ var (
 
 // DB is an abstract sql database type.
 type DB interface {
-	// io.Closer
+	io.Closer
 	QueryContext(context.Context, string, ...any) (Rows, error)
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (Tx, error)
 }
 
 // Pingable is an abstract type that has Ping methods.
@@ -61,6 +62,21 @@ type Rows interface {
 	Err() error
 }
 
+// Scanable is an abstract type for objects that can scan themselves given an
+// database scanner.
+type Scanable interface {
+	Scan(scanner Scanner) error
+}
+
+// StdDB is an interface that is here just in case you need a DB interface that
+// is more easily compatible with the standard library's [database/sql.DB].
+type StdDB interface {
+	io.Closer
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+}
+
 // ScanOne will scan one row from a query and then close the Rows object.
 func ScanOne(r Rows, dest ...any) (err error) {
 	if !r.Next() {
@@ -87,7 +103,9 @@ type Option func(*dbOptions)
 // WithLogger sets the logger to use with an resource that takes an [Option].
 func WithLogger(l *slog.Logger) Option { return func(d *dbOptions) { d.logger = l } }
 
-// New will wrap an [sql.DB] and return a type that implements [DB].
+// New will wrap an [sql.DB] and return a type that implements [DB]. Use this
+// function if you want fancy features like configuration and logging but if you
+// don't need those features then use [Simple].
 func New(pool *sql.DB, opts ...Option) *database {
 	options := dbOptions{}
 	for _, o := range opts {
@@ -117,28 +135,31 @@ func (db *database) QueryContext(ctx context.Context, query string, v ...any) (R
 	return rows, err
 }
 
+func (db *database) BeginTx(ctx context.Context, opts *sql.TxOptions) (Tx, error) {
+	t, err := db.DB.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &tx{Tx: t}, nil
+}
+
 // Simple creates a bare bones simple wrapper around a [sql.DB] that implements
-// [DB].
+// [DB]. If you want fancy features like logging then use [New] with its
+// options.
 func Simple(db *sql.DB) *simple { return &simple{db} }
 
-type simple struct {
-	*sql.DB
-}
+type simple struct{ *sql.DB }
 
 func (db *simple) QueryContext(ctx context.Context, query string, v ...any) (Rows, error) {
 	return db.DB.QueryContext(ctx, query, v...)
 }
 
-// NewTx creates a wrapper around the standard library [sql.Tx] and returns a
-// wrapper type that implements [DB].
-func NewTx(tx *sql.Tx) *Tx { return &Tx{Tx: tx} }
-
-type Tx struct {
-	*sql.Tx
-}
-
-func (tx *Tx) QueryContext(ctx context.Context, query string, v ...any) (Rows, error) {
-	return tx.Tx.QueryContext(ctx, query, v...)
+func (db *simple) BeginTx(ctx context.Context, opts *sql.TxOptions) (Tx, error) {
+	t, err := db.DB.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &tx{Tx: t}, nil
 }
 
 type waitOpts struct {
